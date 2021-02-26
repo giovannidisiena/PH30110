@@ -81,7 +81,7 @@ class Simulation():
 		Calculates the K values in RK4 integration and returns a new f vector.
 
 		:param t: A time, for differential equations with time-dependence.
-		:param dt: A non-adaptive timestep.
+		:param dt: An adaptive timestep.
 
 		:returns f_new: An updated f vector after the given timestep.
 		'''
@@ -94,12 +94,30 @@ class Simulation():
 
 		return f_new
 
-	def run(self, T, nSteps, t0=0):
+	def calculate_step(self, dt):
+		'''
+		Calculates the step error in RK4 integration and returns a new stepsize.
+
+		:param dt: The current timestep.
+
+		:returns dt_new: An updated timestep.
+		'''
+		v1 = np.linalg.norm(np.split(self.rk4(0, dt), self.nDims/2)[1])
+		v2 = np.linalg.norm(np.split(self.rk4(0, 2*dt), self.nDims/2)[1])
+		steperr = np.abs(v1 - v2) / 30
+		if steperr > self.relerr:
+			dt_new = dt*((self.relerr/steperr)**0.75)
+		else:
+			dt_new = 0.9*dt*((self.relerr/steperr)**0.2)
+		return dt_new
+
+	def run(self, T, initstep, relerr=1E-5, t0=0):
 		'''
 		Runs the simulation on a given set of bodies and stores in attribute history.
 
 		:param T: The total time to run the simulation.
-		:param nSteps: The number of timesteps to advance the simulation.
+		:param relerr: The relative error tolerance for each timestep.
+		:param initstep: An optional initial timestep to advance the simulation.
 		:param t0: An optional non-zero start time.
 
 		:returns: None.
@@ -110,21 +128,29 @@ class Simulation():
 			try:
 				_ = t0.unit
 			except:
-				t0=(t0*T.unit).cgs.value
+				t0 = (t0*T.unit).cgs.value
+			try:
+				_ = relerr.unit
+			except:
+				relerr = (relerr*u.m/u.s).cgs.value
+
+			initstep = initstep.cgs.value
 			T = T.cgs.value
 				
 		self.history = [self.f_vec]
+		self.relerr = relerr
 		clock_time = t0
-		dt = T / nSteps
-		print("dt:  {}\n".format(dt))
 		start_time = time.time()
-		for step in range(nSteps):
+		step = 0
+		while clock_time < T:
 			sys.stdout.flush()
-			sys.stdout.write('Integrating: step = {} / {} | simulation time = {}'.format(step+1,nSteps,round(clock_time,3)) + '\r')
-			f_new = self.rk4(clock_time,dt)
+			dt = self.calculate_step(initstep)
+			sys.stdout.write('Integrating: step = {} | simulation time = {}'.format(step,round(clock_time,3)) + '\r')
+			f_new = self.rk4(0, dt)
 			self.history.append(f_new)
 			self.f_vec = f_new
 			clock_time += dt
+			step +=1
 		runtime = time.time() - start_time
 		print('\n')
 		print('Simulation completed in {} seconds'.format(runtime))
@@ -143,7 +169,7 @@ class Simulation():
 		fig, ax = plt.subplots(figsize=(5, 3))
 		cm = plt.cm.get_cmap('jet')
 		sc = plt.scatter(data[0], data[1], c=weights, cmap=cm)
-		plt.plot(0, 0, "*k", markersize=12)
+		plt.plot(0, 0, ".k", markersize=12)
 		plt.colorbar(sc, orientation='vertical')
 		ax.set_title('RK4 Orbit')
 		ax.set_xlabel('$x$')
@@ -186,5 +212,5 @@ Sun = Body(name='Sun',
 bodies = [Comet, Sun]
 simulation = Simulation(bodies)
 simulation.set_diff_eq(two_body_solve, central_mass=Sun.mass, nDims=simulation.nDims)
-simulation.run(75*u.yr, 25)
+simulation.run(75*u.yr, 1*u.yr, 5)
 simulation.plot()
