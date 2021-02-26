@@ -118,7 +118,7 @@ class Simulation():
 		dt = T / nSteps
 		print("dt:  {}\n".format(dt))
 		start_time = time.time()
-		for step in range(nSteps*25):
+		for step in range(nSteps):
 			sys.stdout.flush()
 			sys.stdout.write('Integrating: step = {} / {} | simulation time = {}'.format(step+1,nSteps,round(clock_time,3)) + '\r')
 			f_new = self.rk4(clock_time,dt)
@@ -139,10 +139,13 @@ class Simulation():
 		if not hasattr(self,'history'):
 			raise AttributeError('You must a simulation first.')
 		data = np.column_stack(self.history)
+		weights = np.hypot(data[2], data[3])
 		fig, ax = plt.subplots(figsize=(5, 3))
-		plt.plot(data[0], data[1], "b.")
-		plt.plot(0, 0, "ro")
-		ax.set_title('Scatter: $x$ versus $y$')
+		cm = plt.cm.get_cmap('jet')
+		sc = plt.scatter(data[0], data[1], c=weights, cmap=cm)
+		plt.plot(0, 0, "*k", markersize=12)
+		plt.colorbar(sc, orientation='vertical')
+		ax.set_title('RK4 Orbit')
 		ax.set_xlabel('$x$')
 		ax.set_ylabel('$y$')
 		plt.show()
@@ -171,7 +174,7 @@ def two_body_solve(t, f, f_increment, central_mass, nDims):
 	return incremented_vector
 
 Comet = Body(name='Halley\'s Comet',
-			r_vec = np.array([52E9,0])*u.km,
+			r_vec = np.array([5.2E9,0])*u.km,
 			v_vec = np.array([0,880])*u.m/u.s,
 			mass = (2.2E14*u.kg).si)
 
@@ -183,5 +186,5 @@ Sun = Body(name='Sun',
 bodies = [Comet, Sun]
 simulation = Simulation(bodies)
 simulation.set_diff_eq(two_body_solve, central_mass=Sun.mass, nDims=simulation.nDims)
-simulation.run(75*u.yr, 4)
+simulation.run(75*u.yr, 25)
 simulation.plot()
