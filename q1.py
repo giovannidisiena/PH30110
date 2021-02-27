@@ -75,13 +75,23 @@ class Simulation():
 		'''
 		self.diff_eq_kwargs = kwargs
 		self.calc_diff_eqns = calc_diff_eqns
+	
+	def set_method(self, rk4_method, **kwargs):
+		'''
+		Assigns an internal RK4 solver.
+		
+		:param rk4_method: A function which completes the RK4 routine.
+
+		:returns: None.
+		'''
+		self.rk4_method = rk4_method
 
 	def rk4(self, t, dt):
 		'''
 		Calculates the K values in RK4 integration and returns a new f vector.
 
 		:param t: A time, for differential equations with time-dependence.
-		:param dt: An adaptive timestep.
+		:param dt: A non-adaptive timestep.
 
 		:returns f_new: An updated f vector after the given timestep.
 		'''
@@ -91,6 +101,26 @@ class Simulation():
 		k4 = dt * self.calc_diff_eqns(t + dt, self.f_vec, k3, **self.diff_eq_kwargs)
 
 		f_new = self.f_vec + ((k1 + 2*k2 + 2*k3 + k4) / 6.0)
+
+		return f_new
+
+	def rk4_adaptive(self, t, dt):
+		'''
+		Calculates the K values in RK4 integration and returns a new f vector.
+
+		:param t: A time, for differential equations with time-dependence.
+		:param dt: The current timestep.
+
+		:returns f_new: An updated f vector after the given timestep.
+		'''
+		dt_new = self.calculate_step(dt)
+		k1 = dt_new * self.calc_diff_eqns(t, self.f_vec, None, **self.diff_eq_kwargs)
+		k2 = dt_new * self.calc_diff_eqns(t + 0.5*dt_new, self.f_vec, 0.5*k1, **self.diff_eq_kwargs)
+		k3 = dt_new * self.calc_diff_eqns(t + 0.5*dt_new, self.f_vec, 0.5*k2, **self.diff_eq_kwargs)
+		k4 = dt_new * self.calc_diff_eqns(t + dt_new, self.f_vec, k3, **self.diff_eq_kwargs)
+
+		f_new = self.f_vec + ((k1 + 2*k2 + 2*k3 + k4) / 6.0)
+		self.dt = dt_new
 
 		return f_new
 
@@ -108,16 +138,17 @@ class Simulation():
 		if steperr > self.relerr:
 			dt_new = self.calculate_step(dt*((self.relerr/steperr)**0.6))
 		else:
-			dt_new = 5*dt
+			dt_new = 2*dt
 		return dt_new
 
-	def run(self, T, initstep, relerr=1E-5, t0=0):
+	def run(self, T, initstep, relerr=1E-5, adaptive=True, t0=0):
 		'''
 		Runs the simulation on a given set of bodies and stores in attribute history.
 
 		:param T: The total time to run the simulation.
+		:param initstep: An initial timestep to advance the simulation.
 		:param relerr: The relative error tolerance for each timestep.
-		:param initstep: An optional initial timestep to advance the simulation.
+		:param adaptive: A flag to toggle use of adaptive RK4.
 		:param t0: An optional non-zero start time.
 
 		:returns: None.
@@ -129,27 +160,31 @@ class Simulation():
 				_ = t0.unit
 			except:
 				t0 = (t0*T.unit).cgs.value
+
+			initstep = initstep.cgs.value
+			T = T.cgs.value
+		if adaptive:
 			try:
 				_ = relerr.unit
 			except:
 				relerr = (relerr*u.m/u.s).cgs.value
-
-			initstep = initstep.cgs.value
-			T = T.cgs.value
+			self.set_method(self.rk4_adaptive)
+			self.relerr = relerr
+		else:
+			self.set_method(self.rk4)
 				
 		self.history = [self.f_vec]
-		self.relerr = relerr
+		self.dt = initstep
 		clock_time = t0
 		start_time = time.time()
 		step = 0
 		while clock_time < T:
 			sys.stdout.flush()
-			dt = self.calculate_step(initstep)
 			sys.stdout.write('Integrating: step = {} '.format(step) + '\r')
-			f_new = self.rk4(0, dt)
+			f_new = self.rk4_method(0, self.dt)
 			self.history.append(f_new)
 			self.f_vec = f_new
-			clock_time += dt
+			clock_time += self.dt
 			step +=1
 		runtime = time.time() - start_time
 		print('\n')
@@ -176,17 +211,17 @@ class Simulation():
 		ax.set_ylabel('$y$')
 		plt.show()
 
-'''
-External solver function which calculates the accelerations on the orbiting body at each timestep.
-
-:param t: A dummy time, required by rk4() for differential equations with time-dependence.
-:param f: The f vector at a given timestep.
-:param central_mass: The mass of the central body.
-:param nDims: The number of phase space dimensions.
-
-:returns incremented_vector: evaluated differential equation, containing velocities and accelerations.
-'''
 def two_body_solve(t, f, f_increment, central_mass, nDims):
+	'''
+	External solver function which calculates the accelerations on the orbiting body at each timestep.
+
+	:param t: A dummy time, required by rk4() for differential equations with time-dependence.
+	:param f: The f vector at a given timestep.
+	:param central_mass: The mass of the central body.
+	:param nDims: The number of phase space dimensions.
+
+	:returns incremented_vector: evaluated differential equation, containing velocities and accelerations.
+	'''
 	orbital_position, orbital_velocity = np.split(f, nDims/2)
 	if f_increment is not None:
 		position_increment, velocity_increment = np.split(f_increment, nDims/2)
@@ -212,5 +247,5 @@ Sun = Body(name='Sun',
 bodies = [Comet, Sun]
 simulation = Simulation(bodies)
 simulation.set_diff_eq(two_body_solve, central_mass=Sun.mass, nDims=simulation.nDims)
-simulation.run(75*u.yr, 5*u.yr, 5)
+simulation.run(65*u.yr, 5*u.yr, 10)
 simulation.plot()
