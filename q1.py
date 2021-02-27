@@ -22,9 +22,9 @@ class Body():
 		self.has_units = has_units
 		self.central_body = central_body
 		if self.has_units:
-			self.mass = mass.cgs.value
-			self.r_vec = r_vec.cgs.value
-			self.v_vec = v_vec.cgs.value
+			self.mass = mass.si.value / c.M_sun.value
+			self.r_vec = r_vec.si.value / c.au.value
+			self.v_vec = v_vec.si.value / 30E3
 		else:
 			self.mass = mass
 			self.r_vec = r_vec
@@ -57,11 +57,16 @@ class Simulation():
 		:returns: None.
 		'''
 		self.has_units = has_units
-		self.bodies = bodies
-		self.nDims = len(self.bodies[0].return_vec())
-		self.orbiting_body = self.bodies[0] if not self.bodies[0].central_body else self.bodies[1]
-		self.f_vec = self.orbiting_body.return_vec()
-		self.name_vec = [i.return_name() for i in self.bodies]
+		for body in bodies:
+			if body.central_body:
+				central_body = bodies.pop(bodies.index(body))
+		self.central_mass = central_body.return_mass()
+		self.orbiting_bodies = bodies
+		self.nDims = len(self.orbiting_bodies[0].return_vec())
+		self.nBodies = len(self.orbiting_bodies)
+		self.mass_vec = np.array([i.return_mass() for i in self.orbiting_bodies])
+		self.f_vec = np.concatenate(np.array([i.return_vec() for i in self.orbiting_bodies]))
+		self.name_vec = [i.return_name() for i in self.orbiting_bodies]
 
 	def set_diff_eq(self, calc_diff_eqns, **kwargs):
 		'''
@@ -95,10 +100,14 @@ class Simulation():
 
 		:returns f_new: An updated f vector after the given timestep.
 		'''
-		k1 = dt * self.calc_diff_eqns(t, self.f_vec, None, **self.diff_eq_kwargs)
-		k2 = dt * self.calc_diff_eqns(t + 0.5*dt, self.f_vec, 0.5*k1, **self.diff_eq_kwargs)
-		k3 = dt * self.calc_diff_eqns(t + 0.5*dt, self.f_vec, 0.5*k2, **self.diff_eq_kwargs)
-		k4 = dt * self.calc_diff_eqns(t + dt, self.f_vec, k3, **self.diff_eq_kwargs)
+		k1 = dt * self.calc_diff_eqns(t, self.f_vec, self.central_mass,
+																	self.mass_vec, self.nDims, **self.diff_eq_kwargs)
+		k2 = dt * self.calc_diff_eqns(t + 0.5*dt, self.f_vec + 0.5*k1, self.central_mass,
+																	self.mass_vec, self.nDims, **self.diff_eq_kwargs)
+		k3 = dt * self.calc_diff_eqns(t + 0.5*dt, self.f_vec + 0.5*k2, self.central_mass,
+																	self.mass_vec, self.nDims, **self.diff_eq_kwargs)
+		k4 = dt * self.calc_diff_eqns(t + dt, self.f_vec + k3, self.central_mass,
+																	self.mass_vec, self.nDims, **self.diff_eq_kwargs)
 
 		f_new = self.f_vec + ((k1 + 2*k2 + 2*k3 + k4) / 6.0)
 
@@ -114,12 +123,7 @@ class Simulation():
 		:returns f_new: An updated f vector after the given timestep.
 		'''
 		dt_new = self.calculate_step(dt)
-		k1 = dt_new * self.calc_diff_eqns(t, self.f_vec, None, **self.diff_eq_kwargs)
-		k2 = dt_new * self.calc_diff_eqns(t + 0.5*dt_new, self.f_vec, 0.5*k1, **self.diff_eq_kwargs)
-		k3 = dt_new * self.calc_diff_eqns(t + 0.5*dt_new, self.f_vec, 0.5*k2, **self.diff_eq_kwargs)
-		k4 = dt_new * self.calc_diff_eqns(t + dt_new, self.f_vec, k3, **self.diff_eq_kwargs)
-
-		f_new = self.f_vec + ((k1 + 2*k2 + 2*k3 + k4) / 6.0)
+		f_new = self.rk4(0, dt_new)
 		self.dt = dt_new
 
 		return f_new
@@ -141,7 +145,7 @@ class Simulation():
 			dt_new = 2*dt
 		return dt_new
 
-	def run(self, T, initstep, relerr=1E-5, adaptive=True, t0=0):
+	def run(self, T, initstep, relerr=1E-5, adaptive=True):
 		'''
 		Runs the simulation on a given set of bodies and stores in attribute history.
 
@@ -149,33 +153,29 @@ class Simulation():
 		:param initstep: An initial timestep to advance the simulation.
 		:param relerr: The relative error tolerance for each timestep.
 		:param adaptive: A flag to toggle use of adaptive RK4.
-		:param t0: An optional non-zero start time.
 
 		:returns: None.
 		'''
 		if not hasattr(self,'calc_diff_eqns'):
 			raise AttributeError('You must set a differential equation solver first.')
 		if self.has_units:
-			try:
-				_ = t0.unit
-			except:
-				t0 = (t0*T.unit).cgs.value
-
-			initstep = initstep.cgs.value
-			T = T.cgs.value
+			initstep = (initstep.si.value * 2*np.pi) / (1*u.yr).si.value
+			T = (T.si.value * 2*np.pi) / (1*u.yr).si.value
 		if adaptive:
-			try:
-				_ = relerr.unit
-			except:
-				relerr = (relerr*u.m/u.s).cgs.value
+			if self.has_units:
+				try:
+					_ = relerr.unit
+				except:
+					relerr = (relerr*u.m/u.s).si.value / 30E3
 			self.set_method(self.rk4_adaptive)
 			self.relerr = relerr
 		else:
 			self.set_method(self.rk4)
 				
+		# use standard list because appending to np.array is costly
 		self.history = [self.f_vec]
 		self.dt = initstep
-		clock_time = t0
+		clock_time = 0
 		start_time = time.time()
 		step = 0
 		while clock_time < T:
@@ -198,12 +198,14 @@ class Simulation():
 		:returns: None.
 		'''
 		if not hasattr(self,'history'):
-			raise AttributeError('You must a simulation first.')
+			raise AttributeError('You must set a simulation first.')
 		data = np.column_stack(self.history)
-		weights = np.hypot(data[2], data[3])
+		star_data = np.column_stack(np.split(data, self.nBodies))
+		position_data, velocity_data = np.split(star_data, 2)
+		weights = np.hypot(velocity_data[0], velocity_data[1])
 		fig, ax = plt.subplots(figsize=(5, 3))
 		cm = plt.cm.get_cmap('jet')
-		sc = plt.scatter(data[0], data[1], c=weights, cmap=cm)
+		sc = plt.scatter(position_data[0], position_data[1], c=weights, cmap=cm)
 		plt.plot(0, 0, ".k", markersize=12)
 		plt.colorbar(sc, orientation='vertical')
 		ax.set_title('RK4 Orbit')
@@ -211,41 +213,92 @@ class Simulation():
 		ax.set_ylabel('$y$')
 		plt.show()
 
-def two_body_solve(t, f, f_increment, central_mass, nDims):
+def two_body_solve(t, f, central_mass, orbiting_masses, nDims):
 	'''
 	External solver function which calculates the accelerations on the orbiting body at each timestep.
 
 	:param t: A dummy time, required by rk4() for differential equations with time-dependence.
 	:param f: The f vector at a given timestep.
 	:param central_mass: The mass of the central body.
+	:param orbiting_masses: A dummy vector of orbiting masses, required by rk4()
 	:param nDims: The number of phase space dimensions.
 
 	:returns incremented_vector: evaluated differential equation, containing velocities and accelerations.
 	'''
-	orbital_position, orbital_velocity = np.split(f, nDims/2)
-	if f_increment is not None:
-		position_increment, velocity_increment = np.split(f_increment, nDims/2)
-		incremented_position = np.add(orbital_position, position_increment)
-		incremented_velocity = np.add(orbital_velocity, velocity_increment)
-	else:
-		incremented_position, incremented_velocity = orbital_position, orbital_velocity
-	r = np.linalg.norm(incremented_position)
-	orbital_acceleration = (-c.G.cgs.value * central_mass / r**3) * incremented_position
-	incremented_vector = np.concatenate((incremented_velocity, orbital_acceleration))
+	midpoint = int(nDims/2)
+	position_vector = f[0:midpoint]
+	incremented_vector = np.zeros(f.size)
+	incremented_vector[0:midpoint] = f[midpoint:nDims]
+	r = np.linalg.norm(position_vector)
+	incremented_vector[midpoint:nDims] = (-central_mass / r**3) * position_vector # TODO divide zero check here add softening
 	return incremented_vector
+
+def nbody_solve(t, f, central_mass, orbiting_masses, nDims):
+	'''
+	External solver function which calculates the accelerations on all orbiting bodies at each timestep.
+
+	:param t: A dummy time, required by rk4() for differential equations with time-dependence.
+	:param f: The (composite) f vector at a given timestep.
+	:param central_mass: The mass of the central body.
+	:param orbiting_masses: A vector of interacting masses.
+	:param nDims: The number of phase space dimensions.
+
+	:returns incremented_vector: Evaluated differential equation, containing velocities and accelerations.
+	'''
+	nBodies = len(orbiting_masses)
+	midpoint = int(nDims/2)
+	incremented_vector = np.zeros(f.size)
+	for i in range(nBodies):
+		ioffset = i * nDims
+		incremented_vector[ioffset:ioffset+nDims] += two_body_solve(0, f[ioffset:ioffset+nDims], central_mass, orbiting_masses, nDims)
+		for j in range(nBodies):
+			joffset = j * nDims
+			if i != j:
+				f_tmp = np.append(f[ioffset:ioffset+midpoint] - f[joffset:joffset+midpoint], np.zeros(int(nDims/2)))
+				accelerations = two_body_solve(0, f_tmp, orbiting_masses[j], orbiting_masses, nDims)
+				incremented_vector[ioffset+midpoint:ioffset+nDims] += accelerations[midpoint:nDims]
+	return incremented_vector
+
+def perihelion_velocity(semimajor_axis, eccentricity, central_mass, orbiting_mass):
+	'''
+	External solver function which calculates the initial perihelion velocity for an orbiting body.
+
+	:param semimajor_axis: A dummy time, required by rk4() for differential equations with time-dependence.
+	:param eccentricity: The (composite) f vector at a given timestep.
+	:param central_mass: The mass of the central body.
+	:param orbiting_mass: The mass of the orbiting body.
+
+	:returns initial_velocity: Calculated initial velocity array.
+	'''
+	eccentricity_factor = np.sqrt((1 + eccentricity) / (1 - eccentricity))
+	period_squared = (4 * (np.pi ** 2) * (semimajor_axis ** 3)) / (c.G.si.value * (central_mass+orbiting_mass))
+	v_per = (2 * np.pi * semimajor_axis * eccentricity_factor) / np.sqrt(period_squared)
+	return np.array([0, v_per])*u.m/u.s
 
 Comet = Body(name='Halley\'s Comet',
 			r_vec = np.array([5.2E9,0])*u.km,
 			v_vec = np.array([0,880])*u.m/u.s,
 			mass = (2.2E14*u.kg).si)
 
+star1_velocity = perihelion_velocity((2.52*u.au).si.value, 0, c.M_sun.si.value, 1E-3*c.M_sun.si.value)
+Star1 = Body(name='Star 1',
+			r_vec = np.array([2.52,0])*u.au,
+			v_vec = star1_velocity,
+			mass = 1E-3*c.M_sun.si)
+
+star2_velocity = perihelion_velocity((5.24*u.au).si.value, 0, c.M_sun.si.value, 4E-2*c.M_sun.si.value)
+Star2 = Body(name='Star 2',
+			r_vec = np.array([5.24,0])*u.au,
+			v_vec = star2_velocity,
+			mass = 4E-2*c.M_sun.si)
+
 Sun = Body(name='Sun',
-			r_vec = np.array([0,0])*u.AU,
+			r_vec = np.array([0,0])*u.au,
 			v_vec = np.array([0,0])*u.m/u.s,
 			mass = c.M_sun.si)
 
-bodies = [Comet, Sun]
+bodies = [Star1, Star2, Sun]
 simulation = Simulation(bodies)
-simulation.set_diff_eq(two_body_solve, central_mass=Sun.mass, nDims=simulation.nDims)
-simulation.run(65*u.yr, 5*u.yr, 10)
+simulation.set_diff_eq(nbody_solve)
+simulation.run(15*u.yr, 0.05*u.yr, 10, False)
 simulation.plot()
