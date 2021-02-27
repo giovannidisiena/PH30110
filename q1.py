@@ -106,9 +106,9 @@ class Simulation():
 		v2 = np.linalg.norm(np.split(self.rk4(0, 2*dt), self.nDims/2)[1])
 		steperr = np.abs(v1 - v2) / 30
 		if steperr > self.relerr:
-			dt_new = dt*((self.relerr/steperr)**0.75)
+			dt_new = self.calculate_step(dt*((self.relerr/steperr)**0.6))
 		else:
-			dt_new = 0.9*dt*((self.relerr/steperr)**0.2)
+			dt_new = 5*dt
 		return dt_new
 
 	def run(self, T, initstep, relerr=1E-5, t0=0):
@@ -145,7 +145,7 @@ class Simulation():
 		while clock_time < T:
 			sys.stdout.flush()
 			dt = self.calculate_step(initstep)
-			sys.stdout.write('Integrating: step = {} | simulation time = {}'.format(step,round(clock_time,3)) + '\r')
+			sys.stdout.write('Integrating: step = {} '.format(step) + '\r')
 			f_new = self.rk4(0, dt)
 			self.history.append(f_new)
 			self.f_vec = f_new
@@ -153,7 +153,7 @@ class Simulation():
 			step +=1
 		runtime = time.time() - start_time
 		print('\n')
-		print('Simulation completed in {} seconds'.format(runtime))
+		print('Simulation completed in {} seconds'.format(round(runtime,2)))
 		self.history = np.array(self.history)
 
 	def plot(self):
@@ -212,5 +212,5 @@ Sun = Body(name='Sun',
 bodies = [Comet, Sun]
 simulation = Simulation(bodies)
 simulation.set_diff_eq(two_body_solve, central_mass=Sun.mass, nDims=simulation.nDims)
-simulation.run(75*u.yr, 1*u.yr, 5)
+simulation.run(75*u.yr, 5*u.yr, 5)
 simulation.plot()
