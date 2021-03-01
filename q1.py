@@ -1,3 +1,6 @@
+# PH30110 Computational Astrophysics - Coursework 1
+# Solution based on https://prappleizer.github.io/Tutorials/RK4/RK4_Tutorial_Solutions.html
+
 import numpy as np 
 import matplotlib.pyplot as plt
 import astropy.units as u
@@ -80,14 +83,16 @@ class Simulation():
 		for body in bodies:
 			if body.central_body:
 				central_body = bodies.pop(bodies.index(body))
-		self.central_mass = central_body.return_mass()
+		try:
+			self.central_mass = central_body.return_mass()
+		except:
+			self.central_mass = None
 		self.orbiting_bodies = bodies
 		self.nDims = len(self.orbiting_bodies[0].return_vec())
 		self.nBodies = len(self.orbiting_bodies)
-		self.mass_vec = np.array([i.return_mass() for i in self.orbiting_bodies])
+		self.mass_vec = np.array([body.return_mass() for body in self.orbiting_bodies])
+		self.total_mass = self.central_mass + np.sum(self.mass_vec) if self.central_mass is not None else np.sum(self.mass_vec)
 		self.name_vec = [i.return_name() for i in self.orbiting_bodies]
-		# use standard list because appending to np.array is costly
-		self.history = []
 
 	def set_diff_eq(self, calc_diff_eqns, **kwargs):
 		'''
@@ -170,6 +175,17 @@ class Simulation():
 			dt_new = 2*dt
 		return dt_new
 
+	def calculate_mass_centre(self, mass, f):
+		'''
+		Calculates the centre of mass frame at each timestep.
+
+		:param mass: The mass/masses under observation.
+		:param f: The corresponding phase-space vector(s).
+
+		:returns mass_centre: The centre of mass frame data at the given timestep.
+		'''
+		return mass * f / self.total_mass
+
 	def run(self, T, initstep, relerr=1E-5, adaptive=True):
 		'''
 		Runs the simulation on a given set of bodies and stores in attribute history.
@@ -197,6 +213,12 @@ class Simulation():
 		else:
 			self.set_method(self.rk4)
 
+		# use standard lists to store initial histories because appending to np.array is costly
+		self.history, self.mass_centre = [], []
+		for body in self.orbiting_bodies:
+			self.history.append(np.array(body.return_vec()))
+			# self.mass_centre.append(np.array(self.calculate_mass_centre(body.return_mass(), body.return_vec())))
+
 		self.dt = initstep
 		clock_time = 0
 		start_time = time.time()
@@ -206,16 +228,18 @@ class Simulation():
 			sys.stdout.write('Integrating: step = {} '.format(step) + '\r')
 			for i in range(self.nBodies):
 				body = self.orbiting_bodies[i]
-				self.history.append(body.return_vec())
 				f_new = self.rk4_method(0, i, self.dt)
 				body.set_vec(f_new)
-				self.history.append(f_new)
+				self.history.append(body.return_vec())
+				# mass_centre = self.calculate_mass_centre(body.return_mass(), body.return_vec())
+				# self.mass_centre.append(mass_centre)
 			clock_time += self.dt
 			step +=1
 		runtime = time.time() - start_time
 		print('\n')
 		print('Simulation completed in {} seconds'.format(round(runtime,2)))
 		self.history = np.array(self.history)
+		# self.mass_centre = np.array(self.mass_centre)
 
 	def plot(self):
 		'''
@@ -226,6 +250,8 @@ class Simulation():
 		if not hasattr(self,'history'):
 			raise AttributeError('You must run a simulation first.')
 		data = np.column_stack(self.history)
+		# mass_centre_data = np.column_stack(self.mass_centre)
+		# position_data, velocity_data = np.split(data - mass_centre_data, 2)
 		position_data, velocity_data = np.split(data, 2)
 		weights = np.hypot(velocity_data[0], velocity_data[1])
 		fig, ax = plt.subplots(figsize=(5, 3))
@@ -277,7 +303,8 @@ def nbody_solve(t, bodyIndex, f, central_mass, orbiting_bodies, nDims):
 	nBodies = len(orbiting_bodies)
 	midpoint = int(nDims/2)
 	incremented_vector = np.zeros(f.size)
-	incremented_vector += two_body_solve(0, bodyIndex, f, central_mass, orbiting_bodies, nDims)
+	if central_mass is not None:
+		incremented_vector += two_body_solve(0, bodyIndex, f, central_mass, orbiting_bodies, nDims)
 	for j in range(nBodies):
 		if bodyIndex != j:
 			interactingBody = orbiting_bodies[j]
@@ -340,5 +367,5 @@ Sun = Body(name='Sun',
 bodies = [Planet1, Planet2, Sun]
 simulation = Simulation(bodies)
 simulation.set_diff_eq(nbody_solve)
-simulation.run(15*u.yr, 0.05*u.yr, 10, False)
+simulation.run(15*u.yr, 0.05*u.yr, 1, False)
 simulation.plot()
