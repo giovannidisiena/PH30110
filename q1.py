@@ -22,6 +22,7 @@ class Body():
 		self.has_units = has_units
 		self.central_body = central_body
 		if self.has_units:
+			# convert to G = 1 units suitable for a solar system
 			self.mass = mass.si.value / c.M_sun.value
 			self.r_vec = r_vec.si.value / c.au.value
 			self.v_vec = v_vec.si.value / 30E3
@@ -171,7 +172,7 @@ class Simulation():
 			self.relerr = relerr
 		else:
 			self.set_method(self.rk4)
-				
+
 		# use standard list because appending to np.array is costly
 		self.history = [self.f_vec]
 		self.dt = initstep
@@ -200,17 +201,18 @@ class Simulation():
 		if not hasattr(self,'history'):
 			raise AttributeError('You must set a simulation first.')
 		data = np.column_stack(self.history)
-		star_data = np.column_stack(np.split(data, self.nBodies))
-		position_data, velocity_data = np.split(star_data, 2)
+		planet_data = np.column_stack(np.split(data, self.nBodies))
+		position_data, velocity_data = np.split(planet_data, 2)
 		weights = np.hypot(velocity_data[0], velocity_data[1])
 		fig, ax = plt.subplots(figsize=(5, 3))
 		cm = plt.cm.get_cmap('jet')
 		sc = plt.scatter(position_data[0], position_data[1], c=weights, cmap=cm)
 		plt.plot(0, 0, ".k", markersize=12)
-		plt.colorbar(sc, orientation='vertical')
-		ax.set_title('RK4 Orbit')
-		ax.set_xlabel('$x$')
-		ax.set_ylabel('$y$')
+		plt.colorbar(sc, label='$v$ [30 km/s]', orientation='vertical')
+		nameString = ', '.join(self.name_vec)
+		ax.set_title('RK4 Orbit: ' + nameString)
+		ax.set_xlabel('$x$ [AU]')
+		ax.set_ylabel('$y$ [AU]')
 		plt.show()
 
 def two_body_solve(t, f, central_mass, orbiting_masses, nDims):
@@ -230,7 +232,8 @@ def two_body_solve(t, f, central_mass, orbiting_masses, nDims):
 	incremented_vector = np.zeros(f.size)
 	incremented_vector[0:midpoint] = f[midpoint:nDims]
 	r = np.linalg.norm(position_vector)
-	incremented_vector[midpoint:nDims] = (-central_mass / r**3) * position_vector # TODO divide zero check here add softening
+	# could try/except ZeroDivisionError here and add softening
+	incremented_vector[midpoint:nDims] = (-central_mass / r**3) * position_vector
 	return incremented_vector
 
 def nbody_solve(t, f, central_mass, orbiting_masses, nDims):
@@ -280,24 +283,37 @@ Comet = Body(name='Halley\'s Comet',
 			v_vec = np.array([0,880])*u.m/u.s,
 			mass = (2.2E14*u.kg).si)
 
-star1_velocity = perihelion_velocity((2.52*u.au).si.value, 0, c.M_sun.si.value, 1E-3*c.M_sun.si.value)
-Star1 = Body(name='Star 1',
+planet1_velocity = perihelion_velocity((2.52*u.au).si.value, 0, c.M_sun.si.value, 1E-3*c.M_sun.si.value)
+Planet1 = Body(name='Planet 1',
 			r_vec = np.array([2.52,0])*u.au,
-			v_vec = star1_velocity,
+			v_vec = planet1_velocity,
 			mass = 1E-3*c.M_sun.si)
 
-star2_velocity = perihelion_velocity((5.24*u.au).si.value, 0, c.M_sun.si.value, 4E-2*c.M_sun.si.value)
-Star2 = Body(name='Star 2',
+planet2_velocity = perihelion_velocity((5.24*u.au).si.value, 0, c.M_sun.si.value, 4E-2*c.M_sun.si.value)
+Planet2 = Body(name='Planet 2',
 			r_vec = np.array([5.24,0])*u.au,
-			v_vec = star2_velocity,
+			v_vec = planet2_velocity,
 			mass = 4E-2*c.M_sun.si)
+
+jupiter_velocity = perihelion_velocity((5.204*u.au).si.value, 0.049, c.M_sun.si.value, 1.898E27)
+Jupiter = Body(name='Jupiter',
+			r_vec = np.array([5.204,0])*u.au,
+			v_vec = jupiter_velocity,
+			mass = 1.898E27*u.kg)
+
+saturn_velocity = perihelion_velocity((9.583*u.au).si.value, 0.057, c.M_sun.si.value, 5.683E26)
+Saturn = Body(name='Saturn',
+			r_vec = np.array([9.583,0])*u.au,
+			v_vec = saturn_velocity,
+			mass = 5.683E26*u.kg)
 
 Sun = Body(name='Sun',
 			r_vec = np.array([0,0])*u.au,
 			v_vec = np.array([0,0])*u.m/u.s,
 			mass = c.M_sun.si)
 
-bodies = [Star1, Star2, Sun]
+# could use sys.argv here to pass cli arguments
+bodies = [Planet1, Planet2, Sun]
 simulation = Simulation(bodies)
 simulation.set_diff_eq(nbody_solve)
 simulation.run(15*u.yr, 0.05*u.yr, 10, False)
