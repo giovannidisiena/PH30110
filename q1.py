@@ -33,13 +33,32 @@ class Body():
 		if not np.any(self.r_vec):
 			self.central_body=True
 
+		self.f_vec = np.concatenate((self.r_vec, self.v_vec))
+		self.history = [self.f_vec]
+
 	def return_vec(self):
 		'''
 		Concatenates the r and v vectors into a single numpy arrays to be used in RK formalism.
 
 		:returns: A numpy array composed of two vectors containing x, y and v_x, v_y components.
 		'''
-		return np.concatenate((self.r_vec, self.v_vec))
+		return self.f_vec
+
+	def set_vec(self, f_new):
+		'''
+		Sets the phase-space vector.
+
+		:returns: None.
+		'''
+		self.f_vec = f_new
+
+	def append_history(self, f_vec):
+		'''
+		Appends the phase-space history vector for a given body.
+
+		:returns: None.
+		'''
+		self.history.append(f_vec)
 
 	def return_mass(self):
 		return self.mass
@@ -66,8 +85,9 @@ class Simulation():
 		self.nDims = len(self.orbiting_bodies[0].return_vec())
 		self.nBodies = len(self.orbiting_bodies)
 		self.mass_vec = np.array([i.return_mass() for i in self.orbiting_bodies])
-		self.f_vec = np.concatenate(np.array([i.return_vec() for i in self.orbiting_bodies]))
 		self.name_vec = [i.return_name() for i in self.orbiting_bodies]
+		# use standard list because appending to np.array is costly
+		self.history = []
 
 	def set_diff_eq(self, calc_diff_eqns, **kwargs):
 		'''
@@ -92,56 +112,60 @@ class Simulation():
 		'''
 		self.rk4_method = rk4_method
 
-	def rk4(self, t, dt):
+	def rk4(self, t, bodyIndex, dt):
 		'''
 		Calculates the K values in RK4 integration and returns a new f vector.
 
 		:param t: A time, for differential equations with time-dependence.
+		:param bodyIndex: The index of the current orbiting body.
 		:param dt: A non-adaptive timestep.
 
 		:returns f_new: An updated f vector after the given timestep.
 		'''
-		k1 = dt * self.calc_diff_eqns(t, self.f_vec, self.central_mass,
-																	self.mass_vec, self.nDims, **self.diff_eq_kwargs)
-		k2 = dt * self.calc_diff_eqns(t + 0.5*dt, self.f_vec + 0.5*k1, self.central_mass,
-																	self.mass_vec, self.nDims, **self.diff_eq_kwargs)
-		k3 = dt * self.calc_diff_eqns(t + 0.5*dt, self.f_vec + 0.5*k2, self.central_mass,
-																	self.mass_vec, self.nDims, **self.diff_eq_kwargs)
-		k4 = dt * self.calc_diff_eqns(t + dt, self.f_vec + k3, self.central_mass,
-																	self.mass_vec, self.nDims, **self.diff_eq_kwargs)
+		f_vec = self.orbiting_bodies[bodyIndex].return_vec()
+		k1 = dt * self.calc_diff_eqns(t, bodyIndex, f_vec, self.central_mass,
+																	self.orbiting_bodies, self.nDims, **self.diff_eq_kwargs)
+		k2 = dt * self.calc_diff_eqns(t + 0.5*dt, bodyIndex, f_vec + 0.5*k1, self.central_mass,
+																	self.orbiting_bodies, self.nDims, **self.diff_eq_kwargs)
+		k3 = dt * self.calc_diff_eqns(t + 0.5*dt, bodyIndex, f_vec + 0.5*k2, self.central_mass,
+																	self.orbiting_bodies, self.nDims, **self.diff_eq_kwargs)
+		k4 = dt * self.calc_diff_eqns(t + dt, bodyIndex, f_vec + k3, self.central_mass,
+																	self.orbiting_bodies, self.nDims, **self.diff_eq_kwargs)
 
-		f_new = self.f_vec + ((k1 + 2*k2 + 2*k3 + k4) / 6.0)
+		f_new = f_vec + ((k1 + 2*k2 + 2*k3 + k4) / 6.0)
 
 		return f_new
 
-	def rk4_adaptive(self, t, dt):
+	def rk4_adaptive(self, t, bodyIndex, dt):
 		'''
 		Calculates the K values in RK4 integration and returns a new f vector.
 
 		:param t: A time, for differential equations with time-dependence.
+		:param bodyIndex: The index of the current orbiting body.
 		:param dt: The current timestep.
 
 		:returns f_new: An updated f vector after the given timestep.
 		'''
-		dt_new = self.calculate_step(dt)
-		f_new = self.rk4(0, dt_new)
+		dt_new = self.calculate_step(bodyIndex, dt)
+		f_new = self.rk4(0, bodyIndex, dt_new)
 		self.dt = dt_new
 
 		return f_new
 
-	def calculate_step(self, dt):
+	def calculate_step(self, bodyIndex, dt):
 		'''
 		Calculates the step error in RK4 integration and returns a new stepsize.
 
+		:param bodyIndex: The index of the current orbiting body.
 		:param dt: The current timestep.
 
 		:returns dt_new: An updated timestep.
 		'''
-		v1 = np.linalg.norm(np.split(self.rk4(0, dt), self.nDims/2)[1])
-		v2 = np.linalg.norm(np.split(self.rk4(0, 2*dt), self.nDims/2)[1])
+		v1 = np.linalg.norm(np.split(self.rk4(0, bodyIndex, dt), self.nDims/2)[1])
+		v2 = np.linalg.norm(np.split(self.rk4(0, bodyIndex, 2*dt), self.nDims/2)[1])
 		steperr = np.abs(v1 - v2) / 30
 		if steperr > self.relerr:
-			dt_new = self.calculate_step(dt*((self.relerr/steperr)**0.6))
+			dt_new = self.calculate_step(bodyIndex, dt*((self.relerr/steperr)**0.6))
 		else:
 			dt_new = 2*dt
 		return dt_new
@@ -173,8 +197,6 @@ class Simulation():
 		else:
 			self.set_method(self.rk4)
 
-		# use standard list because appending to np.array is costly
-		self.history = [self.f_vec]
 		self.dt = initstep
 		clock_time = 0
 		start_time = time.time()
@@ -182,9 +204,12 @@ class Simulation():
 		while clock_time < T:
 			sys.stdout.flush()
 			sys.stdout.write('Integrating: step = {} '.format(step) + '\r')
-			f_new = self.rk4_method(0, self.dt)
-			self.history.append(f_new)
-			self.f_vec = f_new
+			for i in range(self.nBodies):
+				body = self.orbiting_bodies[i]
+				self.history.append(body.return_vec())
+				f_new = self.rk4_method(0, i, self.dt)
+				body.set_vec(f_new)
+				self.history.append(f_new)
 			clock_time += self.dt
 			step +=1
 		runtime = time.time() - start_time
@@ -199,10 +224,9 @@ class Simulation():
 		:returns: None.
 		'''
 		if not hasattr(self,'history'):
-			raise AttributeError('You must set a simulation first.')
+			raise AttributeError('You must run a simulation first.')
 		data = np.column_stack(self.history)
-		planet_data = np.column_stack(np.split(data, self.nBodies))
-		position_data, velocity_data = np.split(planet_data, 2)
+		position_data, velocity_data = np.split(data, 2)
 		weights = np.hypot(velocity_data[0], velocity_data[1])
 		fig, ax = plt.subplots(figsize=(5, 3))
 		cm = plt.cm.get_cmap('jet')
@@ -215,15 +239,16 @@ class Simulation():
 		ax.set_ylabel('$y$ [AU]')
 		plt.show()
 
-def two_body_solve(t, f, central_mass, orbiting_masses, nDims):
+def two_body_solve(t, bodyIndex, f, central_mass, orbiting_bodies, nDims):
 	'''
 	External solver function which calculates the accelerations on the orbiting body at each timestep.
 
 	:param t: A dummy time, required by rk4() for differential equations with time-dependence.
-	:param f: The f vector at a given timestep.
+	:param bodyIndex: A dummy index, required by rk4().
+	:param f: The phase-space vector at a given timestep.
 	:param central_mass: The mass of the central body.
-	:param orbiting_masses: A dummy vector of orbiting masses, required by rk4()
-	:param nDims: The number of phase space dimensions.
+	:param orbiting_bodies: A dummy vector of orbiting bodies, required by rk4()
+	:param nDims: The number of phase-space dimensions.
 
 	:returns incremented_vector: evaluated differential equation, containing velocities and accelerations.
 	'''
@@ -236,30 +261,29 @@ def two_body_solve(t, f, central_mass, orbiting_masses, nDims):
 	incremented_vector[midpoint:nDims] = (-central_mass / r**3) * position_vector
 	return incremented_vector
 
-def nbody_solve(t, f, central_mass, orbiting_masses, nDims):
+def nbody_solve(t, bodyIndex, f, central_mass, orbiting_bodies, nDims):
 	'''
 	External solver function which calculates the accelerations on all orbiting bodies at each timestep.
 
 	:param t: A dummy time, required by rk4() for differential equations with time-dependence.
-	:param f: The (composite) f vector at a given timestep.
+	:param bodyIndex: The index of the current body.
+	:param f: The phase-space vector at a given timestep.
 	:param central_mass: The mass of the central body.
-	:param orbiting_masses: A vector of interacting masses.
-	:param nDims: The number of phase space dimensions.
+	:param orbiting_bodies: A vector of interacting bodies.
+	:param nDims: The number of phase-space dimensions.
 
 	:returns incremented_vector: Evaluated differential equation, containing velocities and accelerations.
 	'''
-	nBodies = len(orbiting_masses)
+	nBodies = len(orbiting_bodies)
 	midpoint = int(nDims/2)
 	incremented_vector = np.zeros(f.size)
-	for i in range(nBodies):
-		ioffset = i * nDims
-		incremented_vector[ioffset:ioffset+nDims] += two_body_solve(0, f[ioffset:ioffset+nDims], central_mass, orbiting_masses, nDims)
-		for j in range(nBodies):
-			joffset = j * nDims
-			if i != j:
-				f_tmp = np.append(f[ioffset:ioffset+midpoint] - f[joffset:joffset+midpoint], np.zeros(int(nDims/2)))
-				accelerations = two_body_solve(0, f_tmp, orbiting_masses[j], orbiting_masses, nDims)
-				incremented_vector[ioffset+midpoint:ioffset+nDims] += accelerations[midpoint:nDims]
+	incremented_vector += two_body_solve(0, bodyIndex, f, central_mass, orbiting_bodies, nDims)
+	for j in range(nBodies):
+		if bodyIndex != j:
+			interactingBody = orbiting_bodies[j]
+			f_tmp = np.append(f[0:midpoint] - interactingBody.return_vec()[0:midpoint], np.zeros(int(nDims/2)))
+			accelerations = two_body_solve(0, bodyIndex, f_tmp, interactingBody.return_mass(), orbiting_bodies, nDims)
+			incremented_vector[midpoint:nDims] += accelerations[midpoint:nDims]
 	return incremented_vector
 
 def perihelion_velocity(semimajor_axis, eccentricity, central_mass, orbiting_mass):
