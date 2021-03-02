@@ -1,5 +1,5 @@
 # PH30110 Computational Astrophysics - Coursework 1
-# Solution based on https://prappleizer.github.io/Tutorials/RK4/RK4_Tutorial_Solutions.html
+# Solution based on https://prappleizer.github.io/Tutorials/RK4/RK4_Tutorial.html
 
 import numpy as np 
 import matplotlib.pyplot as plt
@@ -317,8 +317,8 @@ def perihelion_velocity(semimajor_axis, eccentricity, central_mass, orbiting_mas
 	'''
 	External solver function which calculates the initial perihelion velocity for an orbiting body.
 
-	:param semimajor_axis: A dummy time, required by rk4() for differential equations with time-dependence.
-	:param eccentricity: The (composite) f vector at a given timestep.
+	:param semimajor_axis: The semimajor axis of orbit.
+	:param eccentricity: The initial eccentricity of the orbit.
 	:param central_mass: The mass of the central body.
 	:param orbiting_mass: The mass of the orbiting body.
 
@@ -364,8 +364,8 @@ Sun = Body(name='Sun',
 			mass = c.M_sun.si)
 
 # could use sys.argv here to pass cli arguments
-bodies = [Planet1, Planet2, Sun]
+bodies = [Saturn, Jupiter, Sun]
 simulation = Simulation(bodies)
 simulation.set_diff_eq(nbody_solve)
-simulation.run(15*u.yr, 0.05*u.yr, 1, False)
+simulation.run(150*u.yr, 0.05*u.yr, 1, False)
 simulation.plot()
